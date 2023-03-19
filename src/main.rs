@@ -11,9 +11,5 @@ fn main() -> Result<(), eframe::Error> {
         initial_window_size: Some(egui::vec2(2000.0, 2000.0)),
         ..Default::default()
     };
-    eframe::run_native(
-        "My egui App",
-        options,
-        Box::new(|_cc| Box::new(State::new())),
-    )
+    eframe::run_native("Snakes", options, Box::new(|_cc| Box::new(State::new())))
 }

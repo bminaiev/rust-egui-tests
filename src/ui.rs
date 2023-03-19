@@ -1,4 +1,7 @@
-use std::cmp::{max, min};
+use std::{
+    cmp::{max, min},
+    ops::Range,
+};
 
 use eframe::{
     egui::{self, Sense},
@@ -19,6 +22,20 @@ struct Cell {
     row: usize,
 }
 
+#[derive(Debug)]
+struct VisibleArea {
+    rows: Range<usize>,
+    cols: Range<usize>,
+}
+
+impl VisibleArea {
+    pub fn is_too_big(&self) -> bool {
+        let dr = self.rows.len() as i64;
+        let dc = self.cols.len() as i64;
+        dr * dc >= 20_000
+    }
+}
+
 pub struct State {
     screen_transform: ScreenTransform,
     circles: Vec<Circle>,
@@ -28,9 +45,11 @@ pub struct State {
     min_cost: i64,
     max_cost: i64,
     ret_image: RetainedImage,
+    snake_parts: Vec<Vec<Vec<Cell>>>,
 }
 
 const TEST_ID: usize = 5;
+const SNAKE_COLOR: Color32 = Color32::BLUE;
 
 impl State {
     pub fn new() -> Self {
@@ -77,6 +96,7 @@ impl State {
 
         let (min_cost, max_cost) = field_min_max(&a);
 
+        let mut snake_parts = vec![vec![vec![]; cols]; rows];
         let ret_image = {
             const W: usize = 5;
             let mut ci = ColorImage::new([W * a[0].len(), W * a.len()], Color32::WHITE);
@@ -95,6 +115,8 @@ impl State {
                 for w in snake.windows(2) {
                     let dist = w[0].row.abs_diff(w[1].row) + w[0].col.abs_diff(w[1].col);
                     if dist == 1 {
+                        snake_parts[w[0].row][w[0].col].push(w[1]);
+
                         let p1 = Cell {
                             row: w[0].row * W + W / 2,
                             col: w[0].col * W + W / 2,
@@ -105,7 +127,7 @@ impl State {
                         };
                         for r in min(p1.row, p2.row)..=max(p1.row, p2.row) {
                             for c in min(p1.col, p2.col)..=max(p1.col, p2.col) {
-                                ci[(c, r)] = Color32::BLUE;
+                                ci[(c, r)] = SNAKE_COLOR;
                             }
                         }
                     }
@@ -137,6 +159,7 @@ impl State {
             min_cost,
             max_cost,
             ret_image,
+            snake_parts,
         }
     }
 
@@ -158,22 +181,58 @@ impl State {
         }
     }
 
-    fn draw_field(&self, shapes: &mut Vec<Shape>) {
-        for i in 0..self.a.len() {
-            for j in 0..self.a[i].len() {
-                let color = field_color(&self.a, self.min_cost, self.max_cost, i, j);
+    fn draw_snakes_parts(&self, shapes: &mut Vec<Shape>, vis: &VisibleArea) {
+        let stroke = Stroke::new(2.0, SNAKE_COLOR);
+        for r in vis.rows.clone() {
+            for c in vis.cols.clone() {
+                for to in self.snake_parts[r][c].iter() {
+                    let p1 = self
+                        .screen_transform
+                        .to_screen(Point::new(c as f64 + 0.5, r as f64 + 0.5));
+                    let p2 = self
+                        .screen_transform
+                        .to_screen(Point::new(to.col as f64 + 0.5, to.row as f64 + 0.5));
+                    shapes.push(Shape::line_segment([p1, p2], stroke));
+                }
+            }
+        }
+    }
+
+    fn draw_field(&self, shapes: &mut Vec<Shape>, vis: &VisibleArea) {
+        for r in vis.rows.clone() {
+            for c in vis.cols.clone() {
+                let color = field_color(&self.a, self.min_cost, self.max_cost, r, c);
                 let min = self
                     .screen_transform
-                    .to_screen(Point::new(j as f64, i as f64));
+                    .to_screen(Point::new(c as f64, r as f64));
                 let max = self
                     .screen_transform
-                    .to_screen(Point::new(j as f64 + 1.0, i as f64 + 1.0));
+                    .to_screen(Point::new(c as f64 + 1.0, r as f64 + 1.0));
                 shapes.push(Shape::rect_filled(
                     Rect::from_min_max(min, max),
                     Rounding::none(),
                     color,
                 ));
             }
+        }
+    }
+
+    fn calc_visible_area(&self, screen_window: Rect) -> VisibleArea {
+        const SHIFT: i64 = 3;
+
+        let p_min = self.screen_transform.from_screen(screen_window.min);
+        let p_max = self.screen_transform.from_screen(screen_window.max);
+        let rows = self.a.len();
+        let cols = self.a[0].len();
+
+        let calc_visible = |max: usize, from: f64, to: f64| -> Range<usize> {
+            std::cmp::max(from as i64 - SHIFT, 0) as usize
+                ..std::cmp::min(max as i64, to as i64 + SHIFT) as usize
+        };
+
+        VisibleArea {
+            rows: calc_visible(rows, p_min.y, p_max.y),
+            cols: calc_visible(cols, p_min.x, p_max.x),
         }
     }
 }
@@ -225,7 +284,7 @@ impl eframe::App for State {
             });
         }
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("My egui Application");
+            // ui.heading("My egui Application");
 
             let available_rect = ui.available_size();
             // eprintln!("available: {available_rect:?}");
@@ -286,8 +345,14 @@ impl eframe::App for State {
             }
             shapes.extend(circle_shapes.into_iter().map(|c| Shape::Circle(c)));
 
-            // self.draw_field(&mut shapes);
-            // self.draw_snakes(&mut shapes);
+            {
+                let vis = self.calc_visible_area(rect);
+                if !vis.is_too_big() {
+                    self.draw_field(&mut shapes, &vis);
+                    self.draw_snakes_parts(&mut shapes, &vis);
+                }
+                // eprintln!("Vis: {vis:?}, big: {}", vis.is_too_big());
+            }
 
             ui.painter().with_clip_rect(rect).extend(shapes);
         });
