@@ -1,4 +1,5 @@
 mod geometry;
+mod scanner;
 mod screen_transform;
 mod ui;
 
