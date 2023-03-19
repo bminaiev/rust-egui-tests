@@ -4,8 +4,11 @@ use std::{
 };
 
 use eframe::{
-    egui::{self, Sense},
-    epaint::{pos2, vec2, CircleShape, Color32, ColorImage, Rect, Rounding, Shape, Stroke},
+    egui::{self, widgets, FontDefinitions, Sense, TextStyle},
+    emath::Align2,
+    epaint::{
+        pos2, vec2, CircleShape, Color32, ColorImage, FontId, Fonts, Rect, Rounding, Shape, Stroke,
+    },
 };
 use egui_extras::RetainedImage;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -198,6 +201,30 @@ impl State {
         }
     }
 
+    fn draw_text(
+        &self,
+        shapes: &mut Vec<Shape>,
+        vis: &VisibleArea,
+        fonts: &Fonts,
+        font_id: &FontId,
+    ) {
+        for r in vis.rows.clone() {
+            for c in vis.cols.clone() {
+                if let Some(value) = self.a[r][c] {
+                    shapes.push(Shape::text(
+                        fonts,
+                        self.screen_transform
+                            .to_screen(Point::new(c as f64 + 0.5, r as f64 + 0.5)),
+                        Align2::CENTER_CENTER,
+                        value.to_string(),
+                        font_id.clone(),
+                        Color32::WHITE,
+                    ))
+                }
+            }
+        }
+    }
+
     fn draw_field(&self, shapes: &mut Vec<Shape>, vis: &VisibleArea) {
         for r in vis.rows.clone() {
             for c in vis.cols.clone() {
@@ -277,6 +304,7 @@ fn field_color(
 
 impl eframe::App for State {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // widgets::plot
         ctx.set_pixels_per_point(2.0);
         if let Some(chosen_circle) = self.chosen_circle {
             egui::SidePanel::left("my_left_panel").show(ctx, |ui| {
@@ -350,6 +378,10 @@ impl eframe::App for State {
                 if !vis.is_too_big() {
                     self.draw_field(&mut shapes, &vis);
                     self.draw_snakes_parts(&mut shapes, &vis);
+                    if self.screen_transform.to_screen_dist(1.0) > 20.0 {
+                        let font_id = TextStyle::Body.resolve(ui.style());
+                        ctx.fonts(|fonts| self.draw_text(&mut shapes, &vis, &fonts, &font_id));
+                    }
                 }
                 // eprintln!("Vis: {vis:?}, big: {}", vis.is_too_big());
             }
